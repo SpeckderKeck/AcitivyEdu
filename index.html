@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>Class-Activity Board</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+<div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="title">Class-Activity Board 🎲</div>
+        <div class="sub">Track-Außenkontur (20% Deckkraft) • einfache KFZ-Begriffe • iPad-tauglich</div>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button id="toMenuBtn" class="ghost" style="min-width:170px;">Hauptmenü</button>
+        <button id="hardResetBtn" class="bad" style="min-width:150px;">Reset</button>
+      </div>
+    </header>
+
+    <!-- MENU -->
+    <section id="menuView" class="card">
+      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <div>
+          <h2 style="margin:0 0 6px;">Hauptmenü</h2>
+          <div class="muted">Teams, Farben und Figuren auswählen.</div>
+        </div>
+      </div>
+
+      <div class="menuGrid" style="margin-top:14px;">
+        <div class="card" style="margin:0;">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+            <div>
+              <div class="muted">Anzahl Teams</div>
+              <select id="teamCount" style="margin-top:8px;">
+                <option value="2">2 Teams</option>
+                <option value="3">3 Teams</option>
+                <option value="4">4 Teams</option>
+              </select>
+            </div>
+            <div>
+              <div class="muted">Spielfeld-Länge</div>
+              <select id="boardLen" style="margin-top:8px;">
+                <option value="26">26 Felder (schnell)</option>
+                <option value="32" selected>32 Felder (normal)</option>
+                <option value="40">40 Felder (lang)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="muted" style="margin-top:12px;">Teams (Name + Farbe + Figur)</div>
+          <div id="teamInputs" class="teamList"></div>
+
+          <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+            <button id="startGameBtn" class="primary" style="flex:1 1 220px;">Spiel starten</button>
+            <button id="demoFillBtn" class="ghost" style="flex:1 1 220px;">Demo</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin:0;">
+          <div class="muted" style="font-weight:900;">Ablauf</div>
+          <div class="muted" style="margin-top:8px;">
+            1) Würfeln → Figur fährt <b>vor</b> (Vorschau)<br/>
+            2) Kategorie wird <b>2s</b> eingeblendet<br/>
+            3) Karte aufdecken → Timer läuft (nur Karte)<br/>
+            4) Karte schließen → dann Commit/Return-Animation
+          </div>
+          <div class="muted" style="margin-top:10px;">
+            Tipp: Auf iPad unbedingt in Safari/Chrome öffnen (nicht in einer Datei-Vorschau-App).
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GAME -->
+    <section id="gameView" class="hidden">
+      <div class="gameShell">
+        <div class="boardWrap">
+          <div class="boardTop" id="boardTop">
+
+            <!-- Track outline -->
+            <svg class="trackSvg" id="trackSvg" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+
+            <!-- Cells -->
+            <div class="gridLayer" id="pathLayer"></div>
+
+            <!-- Pieces -->
+            <div class="piecesLayer" id="piecesLayer"></div>
+
+            <!-- Legend -->
+            <div class="legend">
+              <div class="legendItem">
+                <span class="swatch" style="background: var(--talk);">🗣️</span>Erklären
+              </div>
+              <div class="legendItem">
+                <span class="swatch" style="background: var(--draw);">✍️</span>Zeichnen
+              </div>
+              <div class="legendItem">
+                <span class="swatch" style="background: var(--mime);">🤫</span>Pantomime
+              </div>
+            </div>
+
+            <!-- Team bottom-right -->
+            <div class="teamCorner">
+              <div class="pill">
+                <span class="small">Am Zug:</span>
+                <span id="turnTeam">–</span>
+              </div>
+            </div>
+
+            <!-- Category flash -->
+            <div class="catFlash" id="catFlash">Kategorie</div>
+
+            <!-- Dice overlay -->
+            <div class="diceOverlay" id="diceOverlay">
+              <div class="dice" id="diceBox">🎲</div>
+            </div>
+
+            <!-- Word overlay -->
+            <div class="overlay" id="wordOverlay">
+              <div class="wordCard">
+                <div class="closeX" id="closeWord">✕</div>
+                <div class="wordTop">
+                  <div class="badge" id="cardCatBadge">🧩 Kategorie</div>
+                  <div class="badge">⏱️ <span id="cardTimer">—</span></div>
+                </div>
+                <div class="muted">Begriff</div>
+                <div class="bigWord" id="cardWord">Bereit?</div>
+                <div class="wordActions" style="margin-top:10px;">
+                  <button id="btnCorrect" class="good">Richtig ✅</button>
+                  <button id="btnWrong" class="bad">Falsch ❌</button>
+                  <button id="btnSwap" class="ghost">Tauschen 🔁</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="bottomBar">
+            <button id="btnRoll" class="primary">Würfeln</button>
+            <button id="btnReveal" class="ghost">Karte</button>
+            <button id="btnNextTeam" class="ghost">Nächstes Team ↻</button>
+            <button id="btnOpenMenu" class="ghost">Einstellungen</button>
+          </div>
+          <div class="muted" style="margin-top:10px;" id="assistantText">Assistent: Teams einstellen und Spiel starten.</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <!-- TEIL 2/2 kommt HIER direkt drunter rein -->
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
