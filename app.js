@@ -57,6 +57,171 @@ const CORR_MIME = [
   "Nacharbeiten", "Nachlackieren", "Schutz an", "Schutz aus", "Fertig"
 ];
 
+
+/***********************
+ * 1b) DATENSÄTZE: Override via CSV (localStorage)
+ * - Import überschreibt die Listen im Browser (kein Cloud-Sync)
+ * - Reset setzt auf Default zurück
+ ***********************/
+const DATASTORE_KEY = "mk11d_datasets_v1";
+
+const DEFAULT_DATASETS = {
+  talk: WORDS_TALK.slice(),
+  draw: WORDS_DRAW.slice(),
+  mime: WORDS_MIME.slice(),
+  corr_talk: CORR_TALK.slice(),
+  corr_draw: CORR_DRAW.slice(),
+  corr_mime: CORR_MIME.slice()
+};
+
+function sanitizeList(arr){
+  if(!Array.isArray(arr)) return [];
+  const out = [];
+  const seen = new Set();
+  for(const v of arr){
+    const s = String(v ?? "").trim();
+    if(!s) continue;
+    const key = s.toLowerCase();
+    if(seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+function loadDatasets(){
+  try{
+    const raw = localStorage.getItem(DATASTORE_KEY);
+    if(!raw) return structuredClone(DEFAULT_DATASETS);
+    const obj = JSON.parse(raw);
+    const ds = {
+      talk: sanitizeList(obj.talk),
+      draw: sanitizeList(obj.draw),
+      mime: sanitizeList(obj.mime),
+      corr_talk: sanitizeList(obj.corr_talk),
+      corr_draw: sanitizeList(obj.corr_draw),
+      corr_mime: sanitizeList(obj.corr_mime)
+    };
+    // Fallback, falls CSV nichts geliefert hat
+    if(ds.talk.length === 0) ds.talk = DEFAULT_DATASETS.talk.slice();
+    if(ds.draw.length === 0) ds.draw = DEFAULT_DATASETS.draw.slice();
+    if(ds.mime.length === 0) ds.mime = DEFAULT_DATASETS.mime.slice();
+    if(ds.corr_talk.length === 0) ds.corr_talk = DEFAULT_DATASETS.corr_talk.slice();
+    if(ds.corr_draw.length === 0) ds.corr_draw = DEFAULT_DATASETS.corr_draw.slice();
+    if(ds.corr_mime.length === 0) ds.corr_mime = DEFAULT_DATASETS.corr_mime.slice();
+    return ds;
+  }catch(e){
+    return structuredClone(DEFAULT_DATASETS);
+  }
+}
+
+function saveDatasets(ds){
+  localStorage.setItem(DATASTORE_KEY, JSON.stringify(ds));
+}
+
+let DATASETS = loadDatasets();
+
+function resetDatasetsToDefault(){
+  localStorage.removeItem(DATASTORE_KEY);
+  DATASETS = structuredClone(DEFAULT_DATASETS);
+  toast("Datensätze zurückgesetzt");
+}
+
+/***********************
+ * CSV PARSER (einfach, robust genug für unsere Zwecke)
+ * Unterstützte Formate:
+ * A) Wide: talk;draw;mime;corr_talk;corr_draw;corr_mime
+ * B) Long: category;word  (category: talk/draw/mime/corr_talk/corr_draw/corr_mime)
+ ***********************/
+function detectDelimiter(line){
+  const semi = (line.match(/;/g) || []).length;
+  const comma = (line.match(/,/g) || []).length;
+  return semi >= comma ? ";" : ",";
+}
+
+function splitCsvLine(line, delim){
+  const out = [];
+  let cur = "";
+  let inQ = false;
+  for(let i=0;i<line.length;i++){
+    const ch = line[i];
+    if(ch === '"'){
+      // doppelte Quotes -> eine Quote
+      if(inQ && line[i+1] === '"'){ cur += '"'; i++; continue; }
+      inQ = !inQ; 
+      continue;
+    }
+    if(!inQ && ch === delim){
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function normalizeHeader(h){ return String(h||"").trim().toLowerCase(); }
+
+function parseCsvToDatasets(csvText){
+  const lines = csvText
+    .replace(/\r/g, "")
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+
+  if(lines.length === 0) throw new Error("CSV ist leer");
+
+  const delim = detectDelimiter(lines[0]);
+  const header = splitCsvLine(lines[0], delim).map(normalizeHeader);
+
+  const isLong = header.includes("category") && header.includes("word");
+  const ds = structuredClone(DEFAULT_DATASETS);
+  ds.talk = []; ds.draw=[]; ds.mime=[];
+  ds.corr_talk=[]; ds.corr_draw=[]; ds.corr_mime=[];
+
+  if(isLong){
+    const cIdx = header.indexOf("category");
+    const wIdx = header.indexOf("word");
+    for(const line of lines.slice(1)){
+      const cols = splitCsvLine(line, delim);
+      const cat = normalizeHeader(cols[cIdx]);
+      const word = String(cols[wIdx] ?? "").trim();
+      if(!word) continue;
+      if(!(cat in ds)) continue;
+      ds[cat].push(word);
+    }
+  }else{
+    // Wide: jede Zeile hat bis zu 6 Spalten (in beliebiger Kombination)
+    const mapIdx = {};
+    for(const k of Object.keys(ds)){
+      const i = header.indexOf(k);
+      if(i !== -1) mapIdx[k] = i;
+    }
+    // Minimal: wenigstens talk/draw/mime oder irgendwas davon
+    if(Object.keys(mapIdx).length === 0) throw new Error("Header nicht erkannt. Nutze z.B. talk;draw;mime");
+    for(const line of lines.slice(1)){
+      const cols = splitCsvLine(line, delim);
+      for(const [k,i] of Object.entries(mapIdx)){
+        const v = String(cols[i] ?? "").trim();
+        if(v) ds[k].push(v);
+      }
+    }
+  }
+
+  // säubern + fallback
+  for(const k of Object.keys(ds)) ds[k] = sanitizeList(ds[k]);
+  if(ds.talk.length === 0) ds.talk = DEFAULT_DATASETS.talk.slice();
+  if(ds.draw.length === 0) ds.draw = DEFAULT_DATASETS.draw.slice();
+  if(ds.mime.length === 0) ds.mime = DEFAULT_DATASETS.mime.slice();
+  if(ds.corr_talk.length === 0) ds.corr_talk = DEFAULT_DATASETS.corr_talk.slice();
+  if(ds.corr_draw.length === 0) ds.corr_draw = DEFAULT_DATASETS.corr_draw.slice();
+  if(ds.corr_mime.length === 0) ds.corr_mime = DEFAULT_DATASETS.corr_mime.slice();
+
+  return ds;
+}
+
 const CAT = {
   talk: { key:"talk", name:"Erklären", emoji:"🗣️", seconds:60,  symbol:"🗣️" },
   draw: { key:"draw", name:"Zeichnen", emoji:"✍️", seconds:90,  symbol:"✍️" },
@@ -147,146 +312,81 @@ const btnSwap      = document.getElementById("btnSwap");
 
 const toastEl      = document.getElementById("toast");
 
+
+/***********************
+ * 3b) CSV IMPORT UI (ohne index.html ändern)
+ ***********************/
+function setupCsvImportUI(){
+  try{
+    if(!menuView) return;
+
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".csv,text/csv";
+    fileInput.style.display = "none";
+    document.body.appendChild(fileInput);
+
+    const importBtn = document.createElement("button");
+    importBtn.type = "button";
+    importBtn.textContent = "📄 CSV importieren (überschreibt)";
+    importBtn.className = "ghost";
+    importBtn.style.minWidth = "260px";
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.textContent = "↩︎ Datensätze zurücksetzen";
+    resetBtn.className = "bad";
+    resetBtn.style.minWidth = "220px";
+
+    // Buttons möglichst in die vorhandene Button-Reihe einhängen
+    const anchor = demoFillBtn?.parentElement || startGameBtn?.parentElement || menuView;
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.gap = "10px";
+    row.style.flexWrap = "wrap";
+    row.style.marginTop = "12px";
+    row.appendChild(importBtn);
+    row.appendChild(resetBtn);
+    anchor.appendChild(row);
+
+    importBtn.addEventListener("click", ()=> fileInput.click());
+    resetBtn.addEventListener("click", ()=>{
+      resetDatasetsToDefault();
+    });
+
+    fileInput.addEventListener("change", async ()=>{
+      const f = fileInput.files?.[0];
+      fileInput.value = "";
+      if(!f) return;
+
+      try{
+        const text = await f.text();
+        const ds = parseCsvToDatasets(text);
+        DATASETS = ds;
+        saveDatasets(DATASETS);
+        toast(`CSV importiert (${ds.talk.length}/${ds.draw.length}/${ds.mime.length})`);
+      }catch(err){
+        console.error(err);
+        toast("CSV-Import fehlgeschlagen");
+        alert(
+          "CSV-Import fehlgeschlagen.\n\n" +
+          "Unterstützte Formate:\n" +
+          "A) talk;draw;mime (optional corr_talk/corr_draw/corr_mime)\n" +
+          "B) category;word (category: talk/draw/mime/corr_talk/corr_draw/corr_mime)\n\n" +
+          "Tipp: Trennzeichen ; ist am sichersten."
+        );
+      }
+    });
+  }catch(e){
+    console.error(e);
+  }
+}
+
 /***********************
  * 4) UTIL
  ***********************/
 function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
 function clamp(n,a,b){ return Math.max(a, Math.min(b,n)); }
-
-/***********************
- * CSV Import (Datensätze überschreiben)
- * Unterstützte Formate:
- *  A) "wide": talk;draw;mime  (Header)  -> jede Zeile = 0..3 Begriffe
- *  B) "long": category;word   (Header)  -> category: talk|draw|mime|corr_talk|corr_draw|corr_mime
- ***********************/
-function detectDelimiter(line){
-  const semis = (line.match(/;/g) || []).length;
-  const commas = (line.match(/,/g) || []).length;
-  return semis >= commas ? ";" : ",";
-}
-
-function parseCsvLine(line, delim){
-  const out = [];
-  let cur = "";
-  let inQ = false;
-  for(let i=0;i<line.length;i++){
-    const ch = line[i];
-    if(inQ){
-      if(ch === '"'){
-        if(line[i+1] === '"'){ cur += '"'; i++; }
-        else inQ = false;
-      }else{
-        cur += ch;
-      }
-    }else{
-      if(ch === '"'){ inQ = true; }
-      else if(ch === delim){
-        out.push(cur.trim());
-        cur = "";
-      }else{
-        cur += ch;
-      }
-    }
-  }
-  out.push(cur.trim());
-  return out;
-}
-
-function parseCSV(text){
-  const cleaned = String(text || "").replace(/^\uFEFF/, "");
-  const lines = cleaned.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length>0);
-  if(lines.length === 0) return { header: [], rows: [], delim: ";" };
-
-  const delim = detectDelimiter(lines[0]);
-  const header = parseCsvLine(lines[0], delim).map(h=>h.trim());
-  const rows = lines.slice(1).map(l=>parseCsvLine(l, delim));
-  return { header, rows, delim };
-}
-
-function normalizeHeader(h){ return String(h||"").trim().toLowerCase(); }
-
-function importDatasetsFromCSV(csvText){
-  const { header, rows } = parseCSV(csvText);
-  if(!rows.length) return { ok:false, msg:"CSV ist leer (keine Datenzeilen)." };
-
-  const h0 = normalizeHeader(header[0]);
-  const h1 = normalizeHeader(header[1]);
-  const headerSet = new Set(header.map(normalizeHeader));
-
-  const hasWide = headerSet.has("talk") || headerSet.has("draw") || headerSet.has("mime");
-  const hasLong = (h0 === "category" && (h1 === "word" || h1 === "begriff")) || (h0 === "kategorie" && (h1 === "word" || h1 === "begriff"));
-
-  // Helper to overwrite only provided keys
-  const next = {
-    talk: null, draw: null, mime: null,
-    corr_talk: null, corr_draw: null, corr_mime: null
-  };
-
-  const pushUnique = (arr, val)=>{
-    const v = String(val||"").trim();
-    if(!v) return;
-    if(arr.indexOf(v) === -1) arr.push(v);
-  };
-
-  if(hasLong){
-    // Long format: category;word
-    for(const r of rows){
-      const cat = normalizeHeader(r[0]);
-      const word = (r[1] ?? "").toString().trim();
-      if(!cat || !word) continue;
-
-      if(!(cat in next)) continue;
-      if(next[cat] === null) next[cat] = [];
-      pushUnique(next[cat], word);
-    }
-  }else if(hasWide){
-    // Wide format: columns talk/draw/mime (order can vary)
-    const idx = {
-      talk: header.map(normalizeHeader).indexOf("talk"),
-      draw: header.map(normalizeHeader).indexOf("draw"),
-      mime: header.map(normalizeHeader).indexOf("mime"),
-      corr_talk: header.map(normalizeHeader).indexOf("corr_talk"),
-      corr_draw: header.map(normalizeHeader).indexOf("corr_draw"),
-      corr_mime: header.map(normalizeHeader).indexOf("corr_mime"),
-    };
-    for(const k of Object.keys(idx)){
-      if(idx[k] !== -1 && next[k] === null) next[k] = [];
-    }
-
-    for(const r of rows){
-      for(const k of Object.keys(idx)){
-        const i = idx[k];
-        if(i === -1) continue;
-        pushUnique(next[k], r[i]);
-      }
-    }
-  }else{
-    // Heuristic: if first column looks like category names, treat as long without header
-    const firstCats = rows.slice(0, Math.min(5, rows.length)).map(r=>normalizeHeader(r[0]));
-    const looksLikeCats = firstCats.some(c=>c in next);
-    if(!looksLikeCats){
-      return { ok:false, msg:"CSV-Header nicht erkannt. Nutze z. B. 'talk;draw;mime' oder 'category;word'." };
-    }
-    for(const r of rows){
-      const cat = normalizeHeader(r[0]);
-      const word = (r[1] ?? "").toString().trim();
-      if(!(cat in next) || !word) continue;
-      if(next[cat] === null) next[cat] = [];
-      pushUnique(next[cat], word);
-    }
-  }
-
-  // Apply overwrites only where user provided something
-  const apply = (k)=>{
-    if(Array.isArray(next[k]) && next[k].length > 0){
-      DATA[k] = next[k];
-    }
-  };
-  ["talk","draw","mime","corr_talk","corr_draw","corr_mime"].forEach(apply);
-
-  saveDatasetOverrides();
-  return { ok:true, msg:"Datensätze importiert und gespeichert." };
-}
 
 function toast(msg){
   toastEl.textContent = msg;
@@ -627,13 +727,14 @@ function pickWordForCategory(catKey){
   // Mix: ca. 25% Korrosion/Schutz, 75% allgemeine Instandhaltung/Mechanik
   const roll = Math.random();
   const pools = {
-    talk: (roll < 0.25 ? CORR_TALK : WORDS_TALK),
-    draw: (roll < 0.25 ? CORR_DRAW : WORDS_DRAW),
-    mime: (roll < 0.25 ? CORR_MIME : WORDS_MIME)
+    talk: (roll < 0.25 ? DATASETS.corr_talk : DATASETS.talk),
+    draw: (roll < 0.25 ? DATASETS.corr_draw : DATASETS.draw),
+    mime: (roll < 0.25 ? DATASETS.corr_mime : DATASETS.mime)
   };
-  const list = pools[catKey] || WORDS_TALK;
+  const list = pools[catKey] || DATASETS.talk;
   return list[randInt(0, list.length-1)];
 }
+
 
 function startCategoryTimer(catKey){
   stopTimer();
@@ -812,83 +913,6 @@ function hardReset(){
   toast("Reset");
 }
 
-
-/***********************
- * 8b) CSV-IMPORT UI (wird dynamisch ins Menü eingesetzt)
- ***********************/
-function setupDatasetImportUI(){
-  // Container: unter den Start/Demo Buttons im Menü
-  const menuCard = document.querySelector("#menuView .menuGrid .card"); // erstes Menü-Card
-  if(!menuCard) return;
-
-  // Falls schon vorhanden, nicht doppelt
-  if(document.getElementById("csvImportBtn")) return;
-
-  const wrap = document.createElement("div");
-  wrap.style.marginTop = "12px";
-  wrap.style.display = "flex";
-  wrap.style.gap = "10px";
-  wrap.style.flexWrap = "wrap";
-
-  const importBtn = document.createElement("button");
-  importBtn.id = "csvImportBtn";
-  importBtn.className = "ghost";
-  importBtn.style.flex = "1 1 220px";
-  importBtn.textContent = "CSV importieren (Datensätze)";
-
-  const resetBtn = document.createElement("button");
-  resetBtn.id = "csvResetBtn";
-  resetBtn.className = "ghost";
-  resetBtn.style.flex = "1 1 220px";
-  resetBtn.textContent = "Datensätze zurücksetzen";
-
-  const help = document.createElement("div");
-  help.className = "muted";
-  help.style.marginTop = "8px";
-  help.style.fontSize = "12px";
-  help.innerHTML = "CSV-Formate: <b>talk;draw;mime</b> (Header) oder <b>category;word</b> (category: talk/draw/mime/corr_...).";
-
-  const file = document.createElement("input");
-  file.type = "file";
-  file.accept = ".csv,text/csv";
-  file.style.display = "none";
-
-  importBtn.addEventListener("click", ()=>{
-    file.value = "";
-    file.click();
-  });
-
-  file.addEventListener("change", async ()=>{
-    const f = file.files && file.files[0];
-    if(!f) return;
-
-    try{
-      const txt = await f.text();
-      const res = importDatasetsFromCSV(txt);
-      if(res.ok){
-        toast("✅ " + res.msg);
-      }else{
-        toast("⚠️ " + res.msg);
-      }
-    }catch(e){
-      console.error(e);
-      toast("❌ CSV konnte nicht gelesen werden.");
-    }
-  });
-
-  resetBtn.addEventListener("click", ()=>{
-    resetDatasetsToDefault();
-    toast("↩️ Datensätze zurückgesetzt");
-  });
-
-  wrap.appendChild(importBtn);
-  wrap.appendChild(resetBtn);
-  menuCard.appendChild(wrap);
-  menuCard.appendChild(help);
-  menuCard.appendChild(file);
-}
-
-
 /***********************
  * 12) EVENTS (iPad-friendly: click + pointerup)
  ***********************/
@@ -989,15 +1013,13 @@ window.addEventListener("keydown", (e)=>{
 /***********************
  * 13) INIT
  ***********************/
-
-loadDatasetOverrides();
-setupDatasetImportUI();
 boardLength = Number(boardLenSel.value);
 teams = [
   {id:0, name:"Team A", color:"#60a5fa", iconKey:"gear",   glyph:"⚙️", committedPos:0, displayPos:0},
   {id:1, name:"Team B", color:"#a78bfa", iconKey:"wrench", glyph:"🔧", committedPos:0, displayPos:0}
 ];
 
+setupCsvImportUI();
 rebuildTeamInputs();
 buildBoard();
 renderPieces();
